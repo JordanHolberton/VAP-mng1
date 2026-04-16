@@ -52,6 +52,10 @@
 <body>
     <div class="secret">CODE: 1234</div>
     <canvas id="liquid"></canvas>
+    <!-- Bouton pour demander la permission gyroscope sur iOS (apparaît seulement si nécessaire) -->
+    <button id="gyroBtn"
+        style="display:none;position:fixed;left:50%;bottom:6vh;transform:translateX(-50%);z-index:3;padding:12px 18px;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.12);backdrop-filter:blur(6px);border-radius:10px;font-size:16px;">Activer
+        gyroscope</button>
 
     <script>
         (() => {
@@ -67,9 +71,14 @@
             const TOUCH_FORCE = 6000;      // intensité de répulsion au toucher
             const MAX_PARTICLES = 2500;    // sécurité pour mobiles
             const GLOSS_ENHANCE = 0.6;     // intensité de la brillance
+            const GYRO_FORCE = 0.45;      // intensité de l'inclinaison
 
             let particles = [];
             let touches = []; // liste de points de contact actifs {x,y,strength}
+            // Gyroscope / orientation
+            let gyroX = 0, gyroY = 0; // valeurs lissées appliquées (forces horizontale/verticale)
+            let gyroXTarget = 0, gyroYTarget = 0; // cibles mises à jour par l'événement
+            const GYRO_SMOOTH = 0.08; // lissage entre target et valeur courante
 
             function resizeCanvas() {
                 DPR = Math.max(1, window.devicePixelRatio || 1);
@@ -115,6 +124,12 @@
                     const dy = p.oy - p.y;
                     p.vx += dx * RETURN_STIFFNESS / p.mass;
                     p.vy += dy * RETURN_STIFFNESS / p.mass;
+
+                    // Appliquer force d'inclinaison (gyroscope)
+                    // gyroXTarget/gyroYTarget: gamma (gauche-droite) and beta (front-back) mapping
+                    // Appliquer sur la vitesse en tenant compte du dt et de la masse
+                    p.vx += gyroX * GYRO_FORCE * dt / p.mass;
+                    p.vy += gyroY * GYRO_FORCE * dt / p.mass;
 
                     // Touches : répulsion additive
                     for (let t of touches) {
@@ -179,6 +194,9 @@
             function animate(now) {
                 const dt = Math.min(34, (now - last)) / 16.666; // frame-normalized delta
                 last = now;
+                // Lissage des valeurs gyroscopiques vers la cible
+                gyroX += (gyroXTarget - gyroX) * GYRO_SMOOTH;
+                gyroY += (gyroYTarget - gyroY) * GYRO_SMOOTH;
                 updateParticles(dt);
                 drawParticles();
                 // Atténuer progressivement l'effet des touches (diminution de strength)
@@ -187,6 +205,56 @@
                     if (touches[i].str < 0.02) touches.splice(i, 1);
                 }
                 requestAnimationFrame(animate);
+            }
+
+            // --- Gyroscope / DeviceOrientation handling ---
+            function handleDeviceOrientation(e) {
+                // e.gamma: left-to-right tilt in degrees [-90,90]
+                // e.beta: front-to-back tilt in degrees [-180,180]
+                // We map gamma to x axis and beta to y axis, scaled to [-1,1]
+                if (e.gamma != null) {
+                    gyroXTarget = (e.gamma / 90) * -1; // invert to match natural gravity direction
+                }
+                if (e.beta != null) {
+                    // clamp beta to [-90,90] for stability
+                    const b = Math.max(-90, Math.min(90, e.beta));
+                    gyroYTarget = (b / 90);
+                }
+            }
+
+            function handleDeviceMotion(e) {
+                // fallback: use accelerationIncludingGravity for quick tilt impulses
+                if (e.accelerationIncludingGravity) {
+                    const ax = e.accelerationIncludingGravity.x || 0;
+                    const ay = e.accelerationIncludingGravity.y || 0;
+                    // map to targets with small scale
+                    gyroXTarget = -ax * 0.6;
+                    gyroYTarget = ay * 0.6;
+                }
+            }
+
+            // Permission request helper for iOS Safari
+            function requestGyroPermission() {
+                // Some iOS versions require a user gesture to request permission
+                if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                    DeviceMotionEvent.requestPermission().then(response => {
+                        if (response === 'granted') {
+                            window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+                            window.addEventListener('devicemotion', handleDeviceMotion, true);
+                            document.getElementById('gyroBtn').style.display = 'none';
+                        } else {
+                            // not granted
+                            console.log('Gyro permission denied');
+                        }
+                    }).catch(err => {
+                        console.warn('Gyro permission error', err);
+                    });
+                } else {
+                    // Non-iOS or permission not required
+                    window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+                    window.addEventListener('devicemotion', handleDeviceMotion, true);
+                    document.getElementById('gyroBtn').style.display = 'none';
+                }
             }
 
             // Convertit position d'événement en coordonnées canvas
@@ -255,6 +323,21 @@
 
                 // Pointer for desktop
                 canvas.addEventListener('pointerdown', handlePointerDown, { passive: false });
+
+                // Gyroscope: check if permission is required (iOS) and show button if so
+                const gyroBtn = document.getElementById('gyroBtn');
+                if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                    // show button to request permission
+                    gyroBtn.style.display = 'block';
+                    gyroBtn.addEventListener('click', (ev) => {
+                        ev.preventDefault();
+                        requestGyroPermission();
+                    }, { once: true });
+                } else {
+                    // directly attach listeners for other browsers
+                    window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+                    window.addEventListener('devicemotion', handleDeviceMotion, true);
+                }
 
                 // Resize
                 window.addEventListener('resize', () => {
