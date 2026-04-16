@@ -59,35 +59,74 @@ function initGame() {
     runner = Runner.create();
     Runner.run(runner, engine);
 
-    // 6. Gestion du Gyroscope
-    window.addEventListener('deviceorientation', (event) => {
-        // Gamma : inclinaison gauche/droite (-90 à 90)
-        // Beta : inclinaison avant/arrière (-180 à 180)
-        let gx = event.gamma / 20;
-        let gy = event.beta / 20;
+    // 6. Gestion du Gyroscope (version plus robuste + lissage)
+    let lastGx = 0;
+    let lastGy = 0;
+    const SMOOTH = 0.12; // 0-1 : plus haut = moins lissé
 
-        // Limiter la force
-        engine.world.gravity.x = Math.max(Math.min(gx, 2), -2);
-        engine.world.gravity.y = Math.max(Math.min(gy, 2), -2);
-    });
+    function handleDeviceOrientation(event) {
+        // certains devices peuvent renvoyer null/undefined ; on protège
+        const gamma = (typeof event.gamma === 'number') ? event.gamma : 0; // gauche/droite
+        const beta = (typeof event.beta === 'number') ? event.beta : 0; // avant/arrière
+
+        // Mapping sensible : diviser pour éviter valeurs extrêmes
+        const rawGx = gamma / 20; // ajuster sensibilité
+        const rawGy = beta / 20;
+
+        // Lissage
+        lastGx += (rawGx - lastGx) * SMOOTH;
+        lastGy += (rawGy - lastGy) * SMOOTH;
+
+        // Clamp et appliqué au monde
+        engine.world.gravity.x = Math.max(Math.min(lastGx, 2), -2);
+        engine.world.gravity.y = Math.max(Math.min(lastGy, 2), -2);
+    }
+
+    window.addEventListener('deviceorientation', handleDeviceOrientation, { passive: true });
+
+    // Debug minimal : si tu veux voir dans la console si des événements arrivent
+    let sawEvent = false;
+    const dbg = (e) => {
+        if (!sawEvent) {
+            console.log('deviceorientation reçu :', e.alpha, e.beta, e.gamma);
+            sawEvent = true;
+            window.removeEventListener('deviceorientation', dbg);
+        }
+    };
+    window.addEventListener('deviceorientation', dbg, { passive: true });
 }
 
 // Gestion du bouton de démarrage (pour les permissions mobiles)
-startBtn.addEventListener('click', () => {
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        DeviceOrientationEvent.requestPermission()
-            .then(permissionState => {
-                if (permissionState === 'granted') {
-                    overlay.style.display = 'none';
-                    initGame();
-                }
-            })
-            .catch(console.error);
-    } else {
-        // Pour les navigateurs qui ne demandent pas de permission (Android)
-        overlay.style.display = 'none';
-        initGame();
+async function requestOrientationPermissionIfNeeded() {
+    // iOS Safari nécessite DeviceOrientationEvent.requestPermission() appelé depuis une interaction utilisateur
+    try {
+        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+            const state = await DeviceOrientationEvent.requestPermission();
+            return state === 'granted';
+        }
+        // Certains appareils/browsers utilisent DeviceMotionEvent.requestPermission
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+            const state = await DeviceMotionEvent.requestPermission();
+            return state === 'granted';
+        }
+        // Pas d'API de permission → autorisé par défaut (Android / desktop)
+        return true;
+    } catch (err) {
+        console.error('Permission request failed', err);
+        return false;
     }
+}
+
+startBtn.addEventListener('click', async () => {
+    // appel depuis un geste utilisateur -> requis par iOS
+    const ok = await requestOrientationPermissionIfNeeded();
+    if (!ok) {
+        console.warn('Permission gyroscope non accordée. Le jeu ne fonctionnera pas sans permission.');
+        // Tu veux absolument le gyroscope : arrête ici si refusé
+        return;
+    }
+    overlay.style.display = 'none';
+    initGame();
 });
 
 // Ajuster la taille si la fenêtre change
