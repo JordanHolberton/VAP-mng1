@@ -4,6 +4,9 @@ let engine, render, runner;
 const canvas = document.getElementById('liquidCanvas');
 const startBtn = document.getElementById('startBtn');
 const overlay = document.getElementById('overlay');
+const modal = overlay.querySelector('.modal');
+const modalTitle = modal.querySelector('h2');
+const modalMsg = modal.querySelector('p');
 
 // Configuration du liquide
 const PARTICLE_COUNT = 180; // Nombre de gouttes
@@ -119,12 +122,30 @@ async function requestOrientationPermissionIfNeeded() {
 
 startBtn.addEventListener('click', async () => {
     // appel depuis un geste utilisateur -> requis par iOS
+    startBtn.disabled = true;
+    startBtn.textContent = 'Activation...';
     const ok = await requestOrientationPermissionIfNeeded();
+    startBtn.disabled = false;
+    startBtn.textContent = 'DÉVERROUILLER';
+
     if (!ok) {
         console.warn('Permission gyroscope non accordée. Le jeu ne fonctionnera pas sans permission.');
-        // Tu veux absolument le gyroscope : arrête ici si refusé
+        // Affiche un message clair et propose de réessayer
+        modalTitle.textContent = 'Permission requise';
+        modalMsg.textContent = "L'accès aux capteurs est nécessaire pour utiliser le gyroscope. Appuie sur 'RÉESSAYER' pour autoriser.";
+        startBtn.textContent = 'RÉESSAYER';
         return;
     }
+
+    // Vérifier si l'API existe au moins
+    const hasDeviceOrientation = typeof DeviceOrientationEvent !== 'undefined' || typeof DeviceMotionEvent !== 'undefined';
+    if (!hasDeviceOrientation) {
+        modalTitle.textContent = 'Capteur indisponible';
+        modalMsg.textContent = "Ce navigateur/appareil ne fournit pas d'événements d'orientation. Le gyroscope n'est pas disponible.";
+        startBtn.style.display = 'none';
+        return;
+    }
+
     overlay.style.display = 'none';
     initGame();
 });
