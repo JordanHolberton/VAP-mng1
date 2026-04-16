@@ -1,159 +1,56 @@
-const { Engine, Render, Runner, Bodies, Composite } = Matter;
-
-let engine, render, runner;
-const canvas = document.getElementById('liquidCanvas');
+// Particle Flow Puzzle - lightweight implementation
+// Particle Flow Puzzle - lightweight implementation
+const canvasEl = document.getElementById('liquidCanvas');
+const ctx = canvasEl.getContext('2d');
 const startBtn = document.getElementById('startBtn');
+const resetBtn = document.getElementById('resetBtn');
+const revealEl = document.getElementById('reveal');
 const overlay = document.getElementById('overlay');
-const modal = overlay.querySelector('.modal');
-const modalTitle = modal.querySelector('h2');
-const modalMsg = modal.querySelector('p');
 
-// Configuration du liquide
-const PARTICLE_COUNT = 180; // Nombre de gouttes
-const PARTICLE_RADIUS = 28; // Taille des gouttes
+let W = 0, H = 0, DPR = Math.max(1, window.devicePixelRatio || 1);
 
-function initGame() {
-    // 1. Création du moteur physique
-    engine = Engine.create();
-
-    // 2. Création du rendu
-    render = Render.create({
-        canvas: canvas,
-        engine: engine,
-        options: {
-            width: window.innerWidth,
-            height: window.innerHeight,
-            background: 'transparent',
-            wireframes: false
-        }
-    });
-
-    // 3. Murs invisibles pour retenir le liquide
-    const wallOptions = { isStatic: true, render: { visible: false } };
-    const walls = [
-        Bodies.rectangle(window.innerWidth / 2, -50, window.innerWidth, 100, wallOptions), // Haut
-        Bodies.rectangle(window.innerWidth / 2, window.innerHeight + 50, window.innerWidth, 100, wallOptions), // Bas
-        Bodies.rectangle(-50, window.innerHeight / 2, 100, window.innerHeight, wallOptions), // Gauche
-        Bodies.rectangle(window.innerWidth + 50, window.innerHeight / 2, 100, window.innerHeight, wallOptions) // Droite
-    ];
-
-    // 4. Création des particules de liquide
-    const particles = [];
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-        particles.push(
-            Bodies.circle(
-                Math.random() * window.innerWidth,
-                Math.random() * window.innerHeight,
-                PARTICLE_RADIUS,
-                {
-                    friction: 0.001,
-                    restitution: 0.1,
-                    density: 0.01,
-                    render: { fillStyle: '#000000' }
-                }
-            )
-        );
-    }
-
-    Composite.add(engine.world, [...walls, ...particles]);
-
-    // 5. Lancement
-    Render.run(render);
-    runner = Runner.create();
-    Runner.run(runner, engine);
-
-    // 6. Gestion du Gyroscope (version plus robuste + lissage)
-    let lastGx = 0;
-    let lastGy = 0;
-    const SMOOTH = 0.12; // 0-1 : plus haut = moins lissé
-
-    function handleDeviceOrientation(event) {
-        // certains devices peuvent renvoyer null/undefined ; on protège
-        const gamma = (typeof event.gamma === 'number') ? event.gamma : 0; // gauche/droite
-        const beta = (typeof event.beta === 'number') ? event.beta : 0; // avant/arrière
-
-        // Mapping sensible : diviser pour éviter valeurs extrêmes
-        const rawGx = gamma / 20; // ajuster sensibilité
-        const rawGy = beta / 20;
-
-        // Lissage
-        lastGx += (rawGx - lastGx) * SMOOTH;
-        lastGy += (rawGy - lastGy) * SMOOTH;
-
-        // Clamp et appliqué au monde
-        engine.world.gravity.x = Math.max(Math.min(lastGx, 2), -2);
-        engine.world.gravity.y = Math.max(Math.min(lastGy, 2), -2);
-    }
-
-    window.addEventListener('deviceorientation', handleDeviceOrientation, { passive: true });
-
-    // Debug minimal : si tu veux voir dans la console si des événements arrivent
-    let sawEvent = false;
-    const dbg = (e) => {
-        if (!sawEvent) {
-            console.log('deviceorientation reçu :', e.alpha, e.beta, e.gamma);
-            sawEvent = true;
-            window.removeEventListener('deviceorientation', dbg);
-        }
-    };
-    window.addEventListener('deviceorientation', dbg, { passive: true });
+function resize() {
+    DPR = Math.max(1, window.devicePixelRatio || 1);
+    W = window.innerWidth; H = window.innerHeight;
+    canvasEl.width = Math.floor(W * DPR);
+    canvasEl.height = Math.floor(H * DPR);
+    canvasEl.style.width = W + 'px';
+    canvasEl.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 }
 
-// Gestion du bouton de démarrage (pour les permissions mobiles)
-async function requestOrientationPermissionIfNeeded() {
-    // iOS Safari nécessite DeviceOrientationEvent.requestPermission() appelé depuis une interaction utilisateur
-    try {
-        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-            const state = await DeviceOrientationEvent.requestPermission();
-            return state === 'granted';
-        }
-        // Certains appareils/browsers utilisent DeviceMotionEvent.requestPermission
-        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-            const state = await DeviceMotionEvent.requestPermission();
-            return state === 'granted';
-        }
-        // Pas d'API de permission → autorisé par défaut (Android / desktop)
-        return true;
-    } catch (err) {
-        console.error('Permission request failed', err);
-        return false;
-    }
-}
+// Particles
+const PCOUNT = 700; const PR = 6;
+let particles = [];
+function createParticles() { particles = []; for (let i = 0; i < PCOUNT; i++) particles.push({ x: Math.random() * W, y: Math.random() * H, vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.5) * 0.6, r: PR }); }
 
-startBtn.addEventListener('click', async () => {
-    // appel depuis un geste utilisateur -> requis par iOS
-    startBtn.disabled = true;
-    startBtn.textContent = 'Activation...';
-    const ok = await requestOrientationPermissionIfNeeded();
-    startBtn.disabled = false;
-    startBtn.textContent = 'DÉVERROUILLER';
+// Obstacles
+let drawing = false, currentLine = [], obstacles = [];
+function startDraw(x, y) { drawing = true; currentLine = [{ x, y }]; }
+function addPoint(x, y) { if (drawing) currentLine.push({ x, y }); }
+function endDraw() { if (drawing) { drawing = false; if (currentLine.length > 1) obstacles.push(currentLine); currentLine = []; } }
 
-    if (!ok) {
-        console.warn('Permission gyroscope non accordée. Le jeu ne fonctionnera pas sans permission.');
-        // Affiche un message clair et propose de réessayer
-        modalTitle.textContent = 'Permission requise';
-        modalMsg.textContent = "L'accès aux capteurs est nécessaire pour utiliser le gyroscope. Appuie sur 'RÉESSAYER' pour autoriser.";
-        startBtn.textContent = 'RÉESSAYER';
-        return;
-    }
+// Physics
+function step(dt) { const gx = 0, gy = 0.36; for (let p of particles) { p.vx += gx * dt; p.vy += gy * dt; p.x += p.vx * dt; p.y += p.vy * dt; if (p.x < -10) p.x = W + 10; if (p.x > W + 10) p.x = -10; if (p.y > H + 20) { p.y = -20; p.vy *= 0.4; } for (let poly of obstacles) { for (let i = 0; i < poly.length - 1; i++) { const a = poly[i], b = poly[i + 1]; const vx = b.x - a.x, vy = b.y - a.y; const wx = p.x - a.x, wy = p.y - a.y; const len2 = vx * vx + vy * vy; if (len2 === 0) continue; let t = (wx * vx + wy * vy) / len2; t = Math.max(0, Math.min(1, t)); const cx = a.x + vx * t, cy = a.y + vy * t; const dx = p.x - cx, dy = p.y - cy; const dist2 = dx * dx + dy * dy; const minD = p.r + 2; if (dist2 < minD * minD) { const dist = Math.sqrt(dist2) || 0.001; const nx = dx / dist, ny = dy / dist; p.x = cx + nx * minD; p.y = cy + ny * minD; const dot = p.vx * nx + p.vy * ny; p.vx -= 1.6 * dot * nx; p.vy -= 1.6 * dot * ny; p.vx *= 0.92; p.vy *= 0.92; } } } } }
 
-    // Vérifier si l'API existe au moins
-    const hasDeviceOrientation = typeof DeviceOrientationEvent !== 'undefined' || typeof DeviceMotionEvent !== 'undefined';
-    if (!hasDeviceOrientation) {
-        modalTitle.textContent = 'Capteur indisponible';
-        modalMsg.textContent = "Ce navigateur/appareil ne fournit pas d'événements d'orientation. Le gyroscope n'est pas disponible.";
-        startBtn.style.display = 'none';
-        return;
-    }
+// Draw
+function draw() { ctx.clearRect(0, 0, W, H); for (let p of particles) { ctx.beginPath(); ctx.fillStyle = '#000'; ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); const speed = Math.min(1.6, Math.hypot(p.vx, p.vy)); const hx = p.x - p.vx * 2.6, hy = p.y - p.vy * 2.6; const g = ctx.createRadialGradient(hx, hy, p.r * 0.05, hx, hy, p.r * 0.9); g.addColorStop(0, 'rgba(255,255,255,' + (0.32 + speed * 0.28) + ')'); g.addColorStop(0.6, 'rgba(255,255,255,0.08)'); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 1.05, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'source-over'; } ctx.strokeStyle = 'rgba(200,200,200,0.95)'; ctx.lineWidth = 6; ctx.lineCap = 'round'; for (let poly of obstacles) { ctx.beginPath(); ctx.moveTo(poly[0].x, poly[0].y); for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y); ctx.stroke(); } if (currentLine.length > 0) { ctx.beginPath(); ctx.moveTo(currentLine[0].x, currentLine[0].y); for (let i = 1; i < currentLine.length; i++) ctx.lineTo(currentLine[i].x, currentLine[i].y); ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 4; ctx.stroke(); } }
 
-    overlay.style.display = 'none';
-    initGame();
-});
+// Reveal
+function calcReveal() { const box = { x: W * 0.15, y: H * 0.25, w: W * 0.7, h: H * 0.5 }; const SAMPLE = 400; let visible = 0; for (let i = 0; i < SAMPLE; i++) { const sx = box.x + Math.random() * box.w, sy = box.y + Math.random() * box.h; let covered = false; for (let p of particles) { const dx = p.x - sx, dy = p.y - sy; if (dx * dx + dy * dy <= (p.r * 1.1) * (p.r * 1.1)) { covered = true; break; } } if (!covered) visible++; } const percent = Math.round((visible / SAMPLE) * 100); revealEl.textContent = 'Révélé: ' + percent + '%'; return percent; }
 
-// Ajuster la taille si la fenêtre change
-window.addEventListener('resize', () => {
-    if (render) {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-    }
-});
+// Input
+function toLocal(e) { const rect = canvasEl.getBoundingClientRect(); if (e.touches && e.touches.length) return Array.from(e.touches).map(t => ({ x: t.clientX - rect.left, y: t.clientY - rect.top })); return [{ x: e.clientX - rect.left, y: e.clientY - rect.top }]; }
+canvasEl.addEventListener('touchstart', (e) => { e.preventDefault(); const pts = toLocal(e); startDraw(pts[0].x, pts[0].y); }, { passive: false });
+canvasEl.addEventListener('touchmove', (e) => { e.preventDefault(); const pts = toLocal(e); addPoint(pts[0].x, pts[0].y); }, { passive: false });
+canvasEl.addEventListener('touchend', (e) => { e.preventDefault(); endDraw(); }, { passive: false });
+canvasEl.addEventListener('pointerdown', (e) => { e.preventDefault(); startDraw(e.clientX, e.clientY); function mv(ev) { addPoint(ev.clientX, ev.clientY); } function up() { endDraw(); window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); } window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up); }, { passive: false });
+
+resetBtn.addEventListener('click', () => { obstacles = []; createParticles(); });
+
+let last = performance.now();
+function loop(now) { const dt = Math.min(40, now - last) / 16.666; last = now; step(dt); draw(); const pct = calcReveal(); if (pct >= 85) revealEl.textContent = 'Révélé: 100% — Bravo!'; requestAnimationFrame(loop); }
+
+function startGame() { resize(); createParticles(); window.addEventListener('resize', resize); if (overlay) overlay.style.display = 'none'; requestAnimationFrame(loop); }
+
+startBtn.addEventListener('click', () => { startGame(); });

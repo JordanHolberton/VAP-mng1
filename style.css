@@ -43,8 +43,37 @@ h1 {
     top: 0;
     left: 0;
     z-index: 2;
-    filter: blur(15px) contrast(30);
+    /* reduce blur for perf */
+    filter: blur(6px) contrast(18);
     /* Cet effet crée l'aspect "fusion liquide" */
+}
+
+/* HUD */
+#hud {
+    position: fixed;
+    left: 8px;
+    top: 8px;
+    z-index: 120;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+#reveal {
+    color: #fff;
+    background: rgba(0, 0, 0, 0.45);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+#resetBtn {
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: none;
+    background: #00d4ff;
+    color: #000;
+    font-weight: 700;
 }
 
 /* Overlay d'activation */
