@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="fr">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>Liquid Reveal</title>
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            background: #000;
+            -webkit-user-select: none;
+            user-select: none;
+            touch-action: none;
+            overflow: hidden;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+        }
+
+        /* Le texte secret en dessous du canvas */
+        .secret {
+            position: fixed;
+            z-index: 0;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-size: 28vw;
+            /* très grand, adapté mobile */
+            line-height: 0.9;
+            font-weight: 700;
+            text-align: center;
+            letter-spacing: 0.02em;
+            pointer-events: none;
+            user-select: none;
+        }
+
+        /* Canvas par-dessus */
+        canvas#liquid {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="secret">CODE: 1234</div>
+    <canvas id="liquid"></canvas>
+
+    <script>
+        (() => {
+            const canvas = document.getElementById('liquid');
+            const ctx = canvas.getContext('2d', { alpha: true });
+            let W = 0, H = 0, DPR = Math.max(1, window.devicePixelRatio || 1);
+
+            // Paramètres
+            const SPACING = 12;         // espacement initial des particules (px)
+            const PARTICLE_RADIUS = 8;  // rayon visuel de base (px)
+            const RETURN_STIFFNESS = 0.02; // retour vers la position d'origine (ressort)
+            const DAMPING = 0.90;          // amortissement
+            const TOUCH_FORCE = 6000;      // intensité de répulsion au toucher
+            const MAX_PARTICLES = 2500;    // sécurité pour mobiles
+            const GLOSS_ENHANCE = 0.6;     // intensité de la brillance
+
+            let particles = [];
+            let touches = []; // liste de points de contact actifs {x,y,strength}
+
+            function resizeCanvas() {
+                DPR = Math.max(1, window.devicePixelRatio || 1);
+                W = Math.max(1, Math.floor(window.innerWidth));
+                H = Math.max(1, Math.floor(window.innerHeight));
+                canvas.width = Math.floor(W * DPR);
+                canvas.height = Math.floor(H * DPR);
+                canvas.style.width = W + 'px';
+                canvas.style.height = H + 'px';
+                ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+                createParticles();
+            }
+
+            // Crée une grille de particules couvrant l'écran
+            function createParticles() {
+                particles = [];
+                const cols = Math.ceil(W / SPACING);
+                const rows = Math.ceil(H / SPACING);
+                let count = 0;
+                for (let j = 0; j <= rows; j++) {
+                    for (let i = 0; i <= cols; i++) {
+                        if (count++ > MAX_PARTICLES) break;
+                        const x = i * SPACING;
+                        const y = j * SPACING;
+                        particles.push({
+                            x: x + (Math.random() - 0.5) * 1.5,
+                            y: y + (Math.random() - 0.5) * 1.5,
+                            ox: x, oy: y, // original position
+                            vx: 0, vy: 0,
+                            r: PARTICLE_RADIUS * (0.8 + Math.random() * 0.6),
+                            mass: 1 + Math.random() * 0.5
+                        });
+                    }
+                    if (count > MAX_PARTICLES) break;
+                }
+            }
+
+            // Met à jour physique (ressort vers ox,oy + réponses au toucher)
+            function updateParticles(dt) {
+                for (let p of particles) {
+                    // Force de retour (ressort)
+                    const dx = p.ox - p.x;
+                    const dy = p.oy - p.y;
+                    p.vx += dx * RETURN_STIFFNESS / p.mass;
+                    p.vy += dy * RETURN_STIFFNESS / p.mass;
+
+                    // Touches : répulsion additive
+                    for (let t of touches) {
+                        const tx = t.x;
+                        const ty = t.y;
+                        let ddx = p.x - tx;
+                        let ddy = p.y - ty;
+                        let dist2 = ddx * ddx + ddy * ddy + 0.0001;
+                        let dist = Math.sqrt(dist2);
+                        if (dist < 150) { // portée d'influence
+                            const push = (TOUCH_FORCE * t.str) / (dist2);
+                            p.vx += (ddx / dist) * push * dt;
+                            p.vy += (ddy / dist) * push * dt;
+                        }
+                    }
+
+                    // Intéraction visqueuse rudimentaire (voisinage non explicite, amortissement)
+                    p.vx *= DAMPING;
+                    p.vy *= DAMPING;
+
+                    // Intégration
+                    p.x += p.vx * dt;
+                    p.y += p.vy * dt;
+
+                    // Petite correction: si très proche de la position d'origine, nudge pour éviter oscillations
+                    if (Math.abs(p.x - p.ox) < 0.01) p.x = p.ox;
+                    if (Math.abs(p.y - p.oy) < 0.01) p.y = p.oy;
+                }
+            }
+
+            // Dessine les particules: corps noir opaque + brillance métallique
+            function drawParticles() {
+                ctx.clearRect(0, 0, W, H);
+
+                // Draw each particle
+                for (let p of particles) {
+                    // Corps (noir opaque)
+                    ctx.beginPath();
+                    ctx.fillStyle = '#000';
+                    ctx.moveTo(p.x + p.r, p.y);
+                    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Brillance: petite zone claire déplacée en fonction de la vitesse (effet speculaire)
+                    const speed = Math.min(1.8, Math.hypot(p.vx, p.vy));
+                    const hx = p.x - (p.vx * 2.5); // highlight offset oppose la direction de la vitesse
+                    const hy = p.y - (p.vy * 2.5);
+                    const grad = ctx.createRadialGradient(hx, hy, p.r * 0.05, hx, hy, p.r * 0.9);
+                    grad.addColorStop(0, `rgba(255,255,255,${0.85 * GLOSS_ENHANCE * (0.4 + speed * 0.6)})`);
+                    grad.addColorStop(0.6, `rgba(255,255,255,${0.12 * GLOSS_ENHANCE})`);
+                    grad.addColorStop(1, 'rgba(0,0,0,0)');
+                    ctx.globalCompositeOperation = 'lighter';
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.r * 1.1, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalCompositeOperation = 'source-over';
+                }
+            }
+
+            let last = performance.now();
+            function animate(now) {
+                const dt = Math.min(34, (now - last)) / 16.666; // frame-normalized delta
+                last = now;
+                updateParticles(dt);
+                drawParticles();
+                // Atténuer progressivement l'effet des touches (diminution de strength)
+                for (let i = touches.length - 1; i >= 0; i--) {
+                    touches[i].str *= 0.92;
+                    if (touches[i].str < 0.02) touches.splice(i, 1);
+                }
+                requestAnimationFrame(animate);
+            }
+
+            // Convertit position d'événement en coordonnées canvas
+            function getPosFromEvent(e) {
+                const rect = canvas.getBoundingClientRect();
+                if (e.touches && e.touches.length) {
+                    const arr = [];
+                    for (let i = 0; i < e.touches.length; i++) {
+                        arr.push({ x: e.touches[i].clientX - rect.left, y: e.touches[i].clientY - rect.top });
+                    }
+                    return arr;
+                } else if (e.clientX != null) {
+                    return [{ x: e.clientX - rect.left, y: e.clientY - rect.top }];
+                }
+                return [];
+            }
+
+            function handleTouchStart(e) {
+                e.preventDefault();
+                const pts = getPosFromEvent(e);
+                for (let p of pts) {
+                    touches.push({ x: p.x, y: p.y, str: 1 });
+                }
+            }
+            function handleTouchMove(e) {
+                e.preventDefault();
+                const pts = getPosFromEvent(e);
+                // update or push touches; simple approach: push with medium strength
+                for (let p of pts) {
+                    touches.push({ x: p.x, y: p.y, str: 0.9 });
+                }
+            }
+            function handleTouchEnd(e) {
+                e.preventDefault();
+                // leave existing touches to fade out
+            }
+
+            // Support pointer/mouse for desktop testing
+            function handlePointerDown(e) {
+                e.preventDefault();
+                touches.push({ x: e.clientX, y: e.clientY, str: 1 });
+                window.addEventListener('pointermove', handlePointerMove, { passive: false });
+                window.addEventListener('pointerup', handlePointerUp, { passive: false });
+            }
+            function handlePointerMove(e) {
+                e.preventDefault();
+                touches.push({ x: e.clientX, y: e.clientY, str: 0.9 });
+            }
+            function handlePointerUp(e) {
+                e.preventDefault();
+                window.removeEventListener('pointermove', handlePointerMove);
+                window.removeEventListener('pointerup', handlePointerUp);
+            }
+
+            // Initialisation
+            function init() {
+                resizeCanvas();
+                last = performance.now();
+                requestAnimationFrame(animate);
+
+                // Touch events
+                canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+                canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+                canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+                canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+                // Pointer for desktop
+                canvas.addEventListener('pointerdown', handlePointerDown, { passive: false });
+
+                // Resize
+                window.addEventListener('resize', () => {
+                    // small timeout to allow orientation/layout to settle
+                    setTimeout(resizeCanvas, 50);
+                });
+            }
+
+            // Lance tout
+            init();
+
+            // Exports for debug in console if besoin
+            window._liquid = { particles, resizeCanvas };
+        })();
+    </script>
+</body>
+
+</html>
