@@ -28,8 +28,8 @@ let score = 0;
 let lastSpawn = 0;
 let gameOver = false;
 
-const SPAWN_INTERVAL = 450; // ms
-const MAX_BUBBLES = 90; // plus de variété
+const SPAWN_INTERVAL = 550; // ms (slower spawn)
+const MAX_BUBBLES = 60; // reduced density
 
 // Colors with names (used for feedback)
 const COLORS = [
@@ -43,12 +43,12 @@ const COLORS = [
     { name: 'rose', hex: '#FF7FBF' }
 ];
 
-// Size levels 1..5 -> radius ranges
+// Size levels 1..5 -> radius ranges (more separated for clearer differences)
 const SIZE_MAP = {
-    1: [12, 18],
-    2: [18, 26],
-    3: [26, 34],
-    4: [34, 44],
+    1: [10, 14],
+    2: [16, 22],
+    3: [24, 30],
+    4: [32, 40],
     5: [44, 60]
 };
 
@@ -89,10 +89,11 @@ function spawnBubble(x) {
             // if color still matches target (it will), keep color but size changed so it's no longer identical
         }
     }
-    const bx = x != null ? x : rand(r, W - r);
-    const by = H + r + rand(10, 60);
-    const vx = rand(-0.45, 0.45);
-    const vy = rand(-1.8, -0.6);
+    const bx = x != null ? Math.max(r, Math.min(W - r, x)) : rand(r, W - r);
+    // spawn a bit below the bottom but not too far, so bubbles rise into view quickly
+    const by = Math.min(H - r * 0.5, H + r + rand(6, 28));
+    const vx = rand(-0.12, 0.12);
+    const vy = rand(-1.2, -0.5);
     bubbles.push({
         x: bx, y: by, vx, vy, r,
         colorName: colorObj.name,
@@ -207,10 +208,21 @@ function update(dt) {
         if (b.x < -b.r) b.x = W + b.r;
         if (b.x > W + b.r) b.x = -b.r;
 
-        // remove at top
-        if (b.y < -b.r * 1.4) {
-            // gentle removal and keep density unless gameOver
-            if (!gameOver) spawnBubble();
+        // When a non-treasure bubble reaches the top margin, wrap it to the bottom
+        const topMargin = b.r + 6; // center stays at least this far from top
+        if (b.y < topMargin) {
+            // For all bubbles (including treasure), wrap to bottom so flow is continuous
+            b.y = H + b.r + rand(6, 28);
+            b.x = Math.max(b.r, Math.min(W - b.r, b.x + rand(-30, 30)));
+            // reset upward velocity so it rises into view
+            b.vy = rand(-1.1, -0.6);
+            b.vx = rand(-0.12, 0.12);
+        }
+
+        // remove when fully off-screen (well above top) to avoid accidental unreachable pop
+        if (b.y < -b.r * 2) {
+            // only respawn if not game over and not the treasure
+            if (!gameOver && !b.treasure) spawnBubble();
             bubbles.splice(i, 1);
         }
     }
@@ -373,10 +385,12 @@ function createTargetBubble(colorName, sizeLevel, code) {
     // build color hex from name
     const col = COLORS.find(c => c.name === colorName) || pickColor();
     const r = getSizeForLevel(sizeLevel);
-    const bx = rand(r + 30, W - r - 30);
-    const by = H + r + rand(10, 60);
-    const vx = rand(-0.2, 0.2);
-    const vy = rand(-1.2, -0.8);
+    // choose a horizontal position well inside the edges
+    const bx = Math.max(r + 20, Math.min(W - r - 20, rand(r + 30, W - r - 30)));
+    // place target within visible vertical bounds (25%..85% of height) so it's reachable
+    const by = rand(H * 0.25, Math.max(H * 0.4, H * 0.85));
+    const vx = rand(-0.08, 0.08);
+    const vy = rand(-0.6, -0.2);
     bubbles.push({
         x: bx, y: by, vx, vy, r,
         colorName: col.name,
@@ -403,6 +417,16 @@ function loop(now) {
 setupTargetForSession(targetCode);
 // initial population (ensure target uniqueness)
 for (let i = 0; i < 12; i++) spawnBubble();
+// remove one bubble of each color from the initial population (but never remove the treasure)
+for (const col of COLORS) {
+    for (let i = 0; i < bubbles.length; i++) {
+        const b = bubbles[i];
+        if (!b.treasure && b.colorName === col.name) {
+            bubbles.splice(i, 1);
+            break; // remove only one for this color
+        }
+    }
+}
 updateScore();
 requestAnimationFrame(loop);
 
