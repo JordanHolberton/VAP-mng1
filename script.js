@@ -1,56 +1,412 @@
-// Particle Flow Puzzle - lightweight implementation
-// Particle Flow Puzzle - lightweight implementation
-const canvasEl = document.getElementById('liquidCanvas');
-const ctx = canvasEl.getContext('2d');
-const startBtn = document.getElementById('startBtn');
-const resetBtn = document.getElementById('resetBtn');
-const revealEl = document.getElementById('reveal');
-const overlay = document.getElementById('overlay');
+// Nouveau script.js : bulles multi-couleurs / tailles + cible unique avec feedback
 
-let W = 0, H = 0, DPR = Math.max(1, window.devicePixelRatio || 1);
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const resetBtn = document.getElementById('resetBtn');
+const toast = document.getElementById('toast');
+
+let DPR = Math.max(1, window.devicePixelRatio || 1);
+let W = 0, H = 0;
 
 function resize() {
     DPR = Math.max(1, window.devicePixelRatio || 1);
-    W = window.innerWidth; H = window.innerHeight;
-    canvasEl.width = Math.floor(W * DPR);
-    canvasEl.height = Math.floor(H * DPR);
-    canvasEl.style.width = W + 'px';
-    canvasEl.style.height = H + 'px';
+    W = Math.max(1, window.innerWidth);
+    H = Math.max(1, window.innerHeight);
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 }
+window.addEventListener('resize', () => setTimeout(resize, 40));
+resize();
 
-// Particles
-const PCOUNT = 700; const PR = 6;
-let particles = [];
-function createParticles() { particles = []; for (let i = 0; i < PCOUNT; i++) particles.push({ x: Math.random() * W, y: Math.random() * H, vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.5) * 0.6, r: PR }); }
+// Game state
+let bubbles = [];
+let score = 0;
+let lastSpawn = 0;
+let gameOver = false;
 
-// Obstacles
-let drawing = false, currentLine = [], obstacles = [];
-function startDraw(x, y) { drawing = true; currentLine = [{ x, y }]; }
-function addPoint(x, y) { if (drawing) currentLine.push({ x, y }); }
-function endDraw() { if (drawing) { drawing = false; if (currentLine.length > 1) obstacles.push(currentLine); currentLine = []; } }
+const SPAWN_INTERVAL = 450; // ms
+const MAX_BUBBLES = 90; // plus de variété
 
-// Physics
-function step(dt) { const gx = 0, gy = 0.36; for (let p of particles) { p.vx += gx * dt; p.vy += gy * dt; p.x += p.vx * dt; p.y += p.vy * dt; if (p.x < -10) p.x = W + 10; if (p.x > W + 10) p.x = -10; if (p.y > H + 20) { p.y = -20; p.vy *= 0.4; } for (let poly of obstacles) { for (let i = 0; i < poly.length - 1; i++) { const a = poly[i], b = poly[i + 1]; const vx = b.x - a.x, vy = b.y - a.y; const wx = p.x - a.x, wy = p.y - a.y; const len2 = vx * vx + vy * vy; if (len2 === 0) continue; let t = (wx * vx + wy * vy) / len2; t = Math.max(0, Math.min(1, t)); const cx = a.x + vx * t, cy = a.y + vy * t; const dx = p.x - cx, dy = p.y - cy; const dist2 = dx * dx + dy * dy; const minD = p.r + 2; if (dist2 < minD * minD) { const dist = Math.sqrt(dist2) || 0.001; const nx = dx / dist, ny = dy / dist; p.x = cx + nx * minD; p.y = cy + ny * minD; const dot = p.vx * nx + p.vy * ny; p.vx -= 1.6 * dot * nx; p.vy -= 1.6 * dot * ny; p.vx *= 0.92; p.vy *= 0.92; } } } } }
+// Colors with names (used for feedback)
+const COLORS = [
+    { name: 'bleu', hex: '#00d4ff' },
+    { name: 'jaune', hex: '#FFD36C' },
+    { name: 'rouge', hex: '#FF9E9E' },
+    { name: 'vert', hex: '#98F7B8' },
+    { name: 'violet', hex: '#E69CE6' },
+    { name: 'cyan', hex: '#6CE7FF' },
+    { name: 'orange', hex: '#FFB86B' },
+    { name: 'rose', hex: '#FF7FBF' }
+];
 
-// Draw
-function draw() { ctx.clearRect(0, 0, W, H); for (let p of particles) { ctx.beginPath(); ctx.fillStyle = '#000'; ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); const speed = Math.min(1.6, Math.hypot(p.vx, p.vy)); const hx = p.x - p.vx * 2.6, hy = p.y - p.vy * 2.6; const g = ctx.createRadialGradient(hx, hy, p.r * 0.05, hx, hy, p.r * 0.9); g.addColorStop(0, 'rgba(255,255,255,' + (0.32 + speed * 0.28) + ')'); g.addColorStop(0.6, 'rgba(255,255,255,0.08)'); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 1.05, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'source-over'; } ctx.strokeStyle = 'rgba(200,200,200,0.95)'; ctx.lineWidth = 6; ctx.lineCap = 'round'; for (let poly of obstacles) { ctx.beginPath(); ctx.moveTo(poly[0].x, poly[0].y); for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y); ctx.stroke(); } if (currentLine.length > 0) { ctx.beginPath(); ctx.moveTo(currentLine[0].x, currentLine[0].y); for (let i = 1; i < currentLine.length; i++) ctx.lineTo(currentLine[i].x, currentLine[i].y); ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 4; ctx.stroke(); } }
+// Size levels 1..5 -> radius ranges
+const SIZE_MAP = {
+    1: [12, 18],
+    2: [18, 26],
+    3: [26, 34],
+    4: [34, 44],
+    5: [44, 60]
+};
 
-// Reveal
-function calcReveal() { const box = { x: W * 0.15, y: H * 0.25, w: W * 0.7, h: H * 0.5 }; const SAMPLE = 400; let visible = 0; for (let i = 0; i < SAMPLE; i++) { const sx = box.x + Math.random() * box.w, sy = box.y + Math.random() * box.h; let covered = false; for (let p of particles) { const dx = p.x - sx, dy = p.y - sy; if (dx * dx + dy * dy <= (p.r * 1.1) * (p.r * 1.1)) { covered = true; break; } } if (!covered) visible++; } const percent = Math.round((visible / SAMPLE) * 100); revealEl.textContent = 'Révélé: ' + percent + '%'; return percent; }
+// Target for this session
+let targetColorName = null;
+let targetSizeLevel = null;
+let targetCode = 'CODE-1234';
 
-// Input
-function toLocal(e) { const rect = canvasEl.getBoundingClientRect(); if (e.touches && e.touches.length) return Array.from(e.touches).map(t => ({ x: t.clientX - rect.left, y: t.clientY - rect.top })); return [{ x: e.clientX - rect.left, y: e.clientY - rect.top }]; }
-canvasEl.addEventListener('touchstart', (e) => { e.preventDefault(); const pts = toLocal(e); startDraw(pts[0].x, pts[0].y); }, { passive: false });
-canvasEl.addEventListener('touchmove', (e) => { e.preventDefault(); const pts = toLocal(e); addPoint(pts[0].x, pts[0].y); }, { passive: false });
-canvasEl.addEventListener('touchend', (e) => { e.preventDefault(); endDraw(); }, { passive: false });
-canvasEl.addEventListener('pointerdown', (e) => { e.preventDefault(); startDraw(e.clientX, e.clientY); function mv(ev) { addPoint(ev.clientX, ev.clientY); } function up() { endDraw(); window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); } window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up); }, { passive: false });
+// Utility
+function rand(min, max) { return min + Math.random() * (max - min); }
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function pickColor() { return pick(COLORS); }
+function getSizeForLevel(level) {
+    const [a, b] = SIZE_MAP[level];
+    return Math.round(rand(a, b));
+}
 
-resetBtn.addEventListener('click', () => { obstacles = []; createParticles(); });
+// Bubble factory (random color & size level)
+function spawnBubble(x) {
+    if (gameOver) return;
+    if (bubbles.length >= MAX_BUBBLES) return;
+    // choose color and size, but avoid creating an exact duplicate of the target
+    let colorObj, sizeLevel, r;
+    colorObj = pickColor();
+    sizeLevel = Math.floor(rand(1, 6)); // 1..5
+    r = getSizeForLevel(sizeLevel);
+    // If a target is defined, ensure non-target bubbles do NOT match both color+size exactly
+    if (targetColorName && targetSizeLevel) {
+        if (colorObj.name === targetColorName && sizeLevel === targetSizeLevel) {
+            // change either color or size to ensure uniqueness
+            // prefer changing size level by +/-1 when possible
+            if (sizeLevel < 5) {
+                sizeLevel = sizeLevel + 1;
+            } else {
+                sizeLevel = sizeLevel - 1;
+            }
+            r = getSizeForLevel(sizeLevel);
+            // if color still matches target (it will), keep color but size changed so it's no longer identical
+        }
+    }
+    const bx = x != null ? x : rand(r, W - r);
+    const by = H + r + rand(10, 60);
+    const vx = rand(-0.45, 0.45);
+    const vy = rand(-1.8, -0.6);
+    bubbles.push({
+        x: bx, y: by, vx, vy, r,
+        colorName: colorObj.name,
+        color: colorObj.hex,
+        sizeLevel,
+        alpha: 1, popped: false, popT: 0,
+        sparkle: Math.random() * 0.9 + 0.5,
+        treasure: false // only createTargetBubble will set true for the unique correct bubble
+    });
+}
 
+// Pop handling and feedback
+function popBubble(b, pointerX, pointerY) {
+    if (b.popped) return;
+    b.popped = true;
+    b.popT = 0;
+
+    // doux pop
+    b.vx *= 0.25;
+    b.vy *= 0.25;
+    b.vx += rand(-0.6, 0.6);
+    b.vy -= rand(0.2, 0.8);
+
+    score += Math.ceil(b.r / 6);
+    updateScore();
+
+    // Feedback logic before finalizing
+    if (b.treasure) {
+        // correct bubble -> end game, reveal code
+        showToast('Bravo ! Code : ' + b.code, { duration: 0 });
+        gameOver = true;
+        interactionsEnabled = false;
+        // disable input handlers by setting flag; handlers check interactionsEnabled
+        // call optional global callback
+        if (typeof window.onTreasureFound === 'function') {
+            try { window.onTreasureFound(b.code); } catch (err) { console.error(err); }
+        }
+        // mark all other bubbles as non-interactive (they still animate then can be cleared)
+        // Stop spawning further bubbles is handled by gameOver flag.
+        return;
+    }
+
+    // If not treasure, give hint
+    if (b.colorName !== targetColorName) {
+        showToast('Mauvaise couleur');
+    } else {
+        // same color but wrong size
+        if (b.sizeLevel < targetSizeLevel) {
+            showToast('Plus gros');
+        } else if (b.sizeLevel > targetSizeLevel) {
+            showToast('Plus petit');
+        } else {
+            // rare case: a bubble matches both color and size but wasn't the treasure because we ensured unique target;
+            // still treat as "presque" and give small feedback
+            showToast('Presque !');
+        }
+    }
+}
+
+// Score UI
+function updateScore() { scoreEl.textContent = 'Score: ' + score; }
+
+// Small toast
+let toastTimer = null;
+let interactionsEnabled = true;
+function showToast(txt, options = {}) {
+    // options.duration in ms; if duration === 0 or Infinity -> persistent (do not auto-hide)
+    const duration = (typeof options.duration === 'number') ? options.duration : 900;
+    toast.textContent = txt;
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateX(-50%) translateY(0)';
+    toast.setAttribute('aria-hidden', 'false');
+    clearTimeout(toastTimer);
+    if (duration > 0 && isFinite(duration)) {
+        toastTimer = setTimeout(() => { toast.style.opacity = '0'; toast.setAttribute('aria-hidden', 'true'); }, duration);
+    } else {
+        // persistent: do not auto-hide
+        toastTimer = null;
+    }
+}
+
+// Physics & drawing
+function update(dt) {
+    if (!gameOver) {
+        // spawn bubbles regularly from bottom
+        lastSpawn += dt * 16.666;
+        if (lastSpawn >= SPAWN_INTERVAL) {
+            lastSpawn = 0;
+            spawnBubble();
+            if (Math.random() < 0.2) spawnBubble(Math.random() < 0.5 ? rand(20, 60) : rand(W - 60, W - 20));
+        }
+    }
+
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+        const b = bubbles[i];
+        if (b.popped) {
+            b.popT += dt;
+            b.alpha = Math.max(0, 1 - b.popT / 18);
+            b.x += b.vx * dt * 0.6;
+            b.y += b.vy * dt * 0.6;
+            if (b.alpha <= 0) bubbles.splice(i, 1);
+            continue;
+        }
+
+        // float up + gentle drift
+        b.vy -= 0.02 * dt;
+        b.vx *= 0.995;
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+
+        // wrap horizontally
+        if (b.x < -b.r) b.x = W + b.r;
+        if (b.x > W + b.r) b.x = -b.r;
+
+        // remove at top
+        if (b.y < -b.r * 1.4) {
+            // gentle removal and keep density unless gameOver
+            if (!gameOver) spawnBubble();
+            bubbles.splice(i, 1);
+        }
+    }
+
+    // softer inter-bubble separation
+    for (let a = 0; a < bubbles.length; a++) {
+        for (let b = a + 1; b < bubbles.length; b++) {
+            const A = bubbles[a], B = bubbles[b];
+            if (A.popped || B.popped) continue;
+            const dx = B.x - A.x, dy = B.y - A.y;
+            const dist2 = dx * dx + dy * dy;
+            const minD = A.r + B.r;
+            if (dist2 > 0 && dist2 < (minD * minD)) {
+                const dist = Math.sqrt(dist2) || 0.01;
+                const nx = dx / dist, ny = dy / dist;
+                const overlap = (minD - dist) * 0.12;
+                A.x -= nx * overlap;
+                A.y -= ny * overlap;
+                B.x += nx * overlap;
+                B.y += ny * overlap;
+                const mvx = (B.vx - A.vx) * 0.007;
+                const mvy = (B.vy - A.vy) * 0.007;
+                A.vx -= mvx; A.vy -= mvy;
+                B.vx += mvx; B.vy += mvy;
+                A.vx *= 0.995; A.vy *= 0.995;
+                B.vx *= 0.995; B.vy *= 0.995;
+            }
+        }
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // subtle background sheen
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, 'rgba(255,255,255,0.02)');
+    bgGrad.addColorStop(1, 'rgba(0,0,0,0.02)');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // draw bubbles: metallic effect using radial gradient + specular
+    for (let b of bubbles) {
+        ctx.save();
+        ctx.globalAlpha = b.alpha;
+        // main circle
+        const g = ctx.createRadialGradient(b.x - b.r * 0.3, b.y - b.r * 0.45, b.r * 0.1, b.x, b.y, b.r);
+        g.addColorStop(0, 'rgba(255,255,255,' + (0.7 * b.sparkle) + ')');
+        g.addColorStop(0.18, 'rgba(255,255,255,' + (0.14 * b.sparkle) + ')');
+        g.addColorStop(0.55, b.color);
+        g.addColorStop(1, 'rgba(10,10,10,0.6)');
+        ctx.beginPath();
+        ctx.fillStyle = g;
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // small bright highlight
+        ctx.globalCompositeOperation = 'lighter';
+        const hx = b.x - b.r * 0.45;
+        const hy = b.y - b.r * 0.6;
+        const hg = ctx.createRadialGradient(hx, hy, 1, hx, hy, b.r * 0.6);
+        hg.addColorStop(0, 'rgba(255,255,255,' + (0.9 * b.sparkle) + ')');
+        hg.addColorStop(0.5, 'rgba(255,255,255,0.08)');
+        hg.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = hg;
+        ctx.beginPath();
+        ctx.arc(hx, hy, b.r * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+
+        // thin rim
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = Math.max(1, b.r * 0.06);
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // optional subtle label for debugging (disabled)
+        // ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillText(b.colorName + ' ' + b.sizeLevel, b.x-10, b.y+4);
+
+        ctx.restore();
+    }
+}
+
+// input: pointer/touch pop
+function getPosFromEvent(e) {
+    const rect = canvas.getBoundingClientRect();
+    if (e.touches && e.touches.length) {
+        return Array.from(e.touches).map(t => ({ x: t.clientX - rect.left, y: t.clientY - rect.top }));
+    } else {
+        return [{ x: e.clientX - rect.left, y: e.clientY - rect.top }];
+    }
+}
+
+function handleTapAt(x, y) {
+    if (gameOver || !interactionsEnabled) return; // ignore taps after finish or when interactions disabled
+    // find nearest bubble under point (largest first)
+    let hitIdx = -1, hitPrior = -1;
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+        const b = bubbles[i];
+        if (b.popped) continue;
+        const dx = b.x - x, dy = b.y - y;
+        if (dx * dx + dy * dy <= (b.r * b.r)) {
+            if (b.r > hitPrior) { hitPrior = b.r; hitIdx = i; }
+        }
+    }
+    if (hitIdx >= 0) {
+        popBubble(bubbles[hitIdx], x, y);
+    } else {
+        // small spawn nudge where tapped
+        for (let i = 0; i < 2; i++) spawnBubble(x + rand(-20, 20));
+    }
+}
+
+// pointer/touch handlers
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const pts = getPosFromEvent(e);
+    for (let p of pts) handleTapAt(p.x, p.y);
+}, { passive: false });
+
+canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    handleTapAt(x, y);
+}, { passive: false });
+
+// reset
+resetBtn.addEventListener('click', () => {
+    bubbles = [];
+    score = 0;
+    gameOver = false;
+    interactionsEnabled = true;
+    updateScore();
+    // prefill a few
+    // pick new target and create it (setupTarget will also create the unique treasure bubble)
+    setupTargetForSession();
+    // prefill a few
+    for (let i = 0; i < 10; i++) spawnBubble();
+    // hide any persistent toasts
+    toast.style.opacity = '0'; toast.setAttribute('aria-hidden', 'true');
+    showToast('Reset - nouvelle partie');
+});
+
+// session target creation: choose color & size, then create exactly one matching bubble
+function setupTargetForSession(code) {
+    // choose randomly
+    const c = pickColor();
+    targetColorName = c.name;
+    targetSizeLevel = Math.floor(rand(1, 6)); // 1..5
+    if (code) targetCode = String(code);
+    // ensure one exact matching bubble exists and is unique
+    createTargetBubble(targetColorName, targetSizeLevel, targetCode);
+    console.log('Target:', targetColorName, 'size', targetSizeLevel, 'code', targetCode);
+}
+
+// create exactly one target bubble (golden properties to stand out if wanted)
+function createTargetBubble(colorName, sizeLevel, code) {
+    // build color hex from name
+    const col = COLORS.find(c => c.name === colorName) || pickColor();
+    const r = getSizeForLevel(sizeLevel);
+    const bx = rand(r + 30, W - r - 30);
+    const by = H + r + rand(10, 60);
+    const vx = rand(-0.2, 0.2);
+    const vy = rand(-1.2, -0.8);
+    bubbles.push({
+        x: bx, y: by, vx, vy, r,
+        colorName: col.name,
+        color: col.hex,
+        sizeLevel,
+        alpha: 1, popped: false, popT: 0,
+        sparkle: 1.2,
+        treasure: true,
+        code: String(code)
+    });
+}
+
+// game loop
 let last = performance.now();
-function loop(now) { const dt = Math.min(40, now - last) / 16.666; last = now; step(dt); draw(); const pct = calcReveal(); if (pct >= 85) revealEl.textContent = 'Révélé: 100% — Bravo!'; requestAnimationFrame(loop); }
+function loop(now) {
+    const dt = Math.min(60, now - last);
+    last = now;
+    update(dt / 16.666);
+    draw();
+    requestAnimationFrame(loop);
+}
 
-function startGame() { resize(); createParticles(); window.addEventListener('resize', resize); if (overlay) overlay.style.display = 'none'; requestAnimationFrame(loop); }
+// initial target then population
+setupTargetForSession(targetCode);
+// initial population (ensure target uniqueness)
+for (let i = 0; i < 12; i++) spawnBubble();
+updateScore();
+requestAnimationFrame(loop);
 
-startBtn.addEventListener('click', () => { startGame(); });
+// expose helper for external control if needed
+window.createTargetBubble = createTargetBubble;
+window.setupTargetForSession = setupTargetForSession;
+window._bubbles = bubbles;

@@ -1,36 +1,23 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Cryptex Gravitationnel</title>
+    <meta charset="utf-8" />
+    <meta name="viewport"
+        content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=0" />
+    <title>Bubble Pop</title>
     <link rel="stylesheet" href="style.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
 </head>
 
 <body>
-
-    <div id="secret-container">
-        <p>L'INDICE SECRET EST :</p>
-        <h1>DANS LE VIEUX PUITS</h1>
-        <div class="code-box">CODE : 8842</div>
-    </div>
-
-    <canvas id="liquidCanvas"></canvas>
-
     <div id="hud">
-        <div id="reveal">Révélé: 0%</div>
-        <button id="resetBtn">Reset</button>
+        <div id="score">Score: 0</div>
+        <button id="resetBtn" aria-label="Reset">Reset</button>
     </div>
 
-    <div id="overlay">
-        <div class="modal">
-            <h2>Cryptex Scellé</h2>
-            <p>Inclinez votre appareil pour déplacer le liquide et révéler le secret.</p>
-            <button id="startBtn">DÉVERROUILLER</button>
-        </div>
-    </div>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="toast" aria-hidden="true"></div>
 
     <script src="script.js"></script>
 </body>
